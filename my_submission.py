@@ -1,9 +1,13 @@
+import random
 import tensorflow as tf
 from tensorflow import keras
 import numpy as np
 from keras import backend as K
+from keras.models import Model
 
-
+"""
+Split the dataset so that training occurs on digits [2,3,4,5,6,7] and testing occurs accross all digits
+"""
 def split_dataset(x_tr,y_tr,x_t,y_t): # Split dataset into training and test sets using given integers
     # Combine datasets to be split based on integers
     X = np.concatenate((x_tr,x_t))
@@ -24,10 +28,40 @@ def split_dataset(x_tr,y_tr,x_t,y_t): # Split dataset into training and test set
     y_t2, y_tr = y_tr[split::], y_tr[:split:]
 
     return ((x_tr, x_t, x_t2)), ((y_tr, y_t, y_t2))
+"""
+Create pairs from dataset that alternate between positive and negative
+"""
+def create_pairs(xlist, digit_idx):
+    #Initialise lists
+    pairs = []
+    labels = []
+    
+    digit_len = [len(digit_idx[d]) for d in range(num_classes)] # Get the number of items for each digit/class
+    n = min(digit_len) - 1 # Find the length of the smallest set of digits
+    
+    for d in range(num_classes):
+        for i in range(n):
+            # Assign positive pair
+            pos_idx1, pos_idx2 = digit_idx[d][i], digit_idx[d][i+1]
+            pos1, pos2 = xlist[pos_idx1], xlist[pos_idx2]
+            pairs += [[pos1,pos2]]
+            
+            # Assign a random digit that is not the original digit
+            rand_d = random.randrange(1,num_classes)
+            rand_d = (d + rand_d) % num_classes
+            
+            # Assign negative pair
+            neg_idx1, neg_idx2 = digit_idx[d][i], digit_idx[rand_d][i]
+            neg1, neg2 = xlist[neg_idx1], xlist[neg_idx2]
+            pairs += [[neg1,neg2]]
+            
+            # Assign labels for positive and negative pair
+            labels += [1,0]
+            
+    return np.array(pairs), np.array(labels)
 
 """
 Create the base model for siamese network, this is based on CNN architecture
-
 """
 def base_model(input_shape, num_classes):
     model = keras.models.Sequential()
@@ -48,10 +82,8 @@ def base_model(input_shape, num_classes):
 Define functions to compute euclidean distance.
 The eucledian distance can be computed by square all the distance between x and y, then square it (power of 2). 
 Lastly, the distance is the squareroot of the sum all of results. 
-
 :param: 2D vector
 :return enclidean distance
-
 """
 def euclidean_distance(vec_2d):
     x, y = vec_2d
@@ -62,10 +94,8 @@ def euclidean_distance(vec_2d):
 """
 Define functions to convert the shape of euclidean distance function.
 This will be used in to define the output_shape of the Lambda layer
-
 :params: shapes (2D/x and y)
 :return: tuples(x,1)
-
 """
 def euclidean_distance_output_shape(shapes):
     shape1, shape2 = shapes
@@ -76,27 +106,24 @@ Generate accuracy for siamese net.
 The threshold is set to 0.5, if the distance predicted is more than threshold, it will be counted as 0 (= False).
 In other words, if the distance between pair is close enough, it will be consider them as identical pair.
 Finally the prediction is compared to the ground truth
-
 :params y_ground_truth: ground truth of the data
 :params y_pred: prediction result from the model
-
 :return: accuracy (since the data are either 0 or 1 (true or false), we can use mean function of comparison to compute accuracy)
-
 """
 def compute_accuracy(y_ground_truth, y_pred):
+    '''Compute classification accuracy with a fixed threshold on distances.
+    '''
     pred = y_pred.ravel() < 0.5
     return np.mean(pred == y_ground_truth)
 
 
 """
 Main code start 
-
 """
 (x_train, y_train), (x_test, y_test) = keras.datasets.mnist.load_data()
 
 """
 1. Get input size to be used later in defining Sequencial model
-
 """
 # Define image dimension (rows and cols) and number of classes
 img_rows, img_cols = 28, 28
@@ -111,11 +138,10 @@ else:
     x_test = x_test.reshape(x_test.shape[0], img_rows, img_cols, 1)
     input_shape = (img_rows, img_cols, 1)
 
-left_input = keras.layers.Input(input_shape)
-right_input = keras.layers.Input(input_shape)
+left_input = keras.layers.Input(shape=input_shape)
+right_input = keras.layers.Input(shape=input_shape)
 """
 2. Preprocess dataset
-
 """
 # Split dataset
 x_set, y_set = split_dataset(x_train, y_train, x_test, y_test)
@@ -123,19 +149,23 @@ x_train, x_test, x_test_unknown = x_set
 y_train, y_test, y_test_unknown = y_set
 
 # Create training pairs
-#siamese_train_pairs, siamese_train_y = 
+digit_idx = [np.where(y_train == i)[0] for i in range(num_classes)]
+siamese_train_pairs, siamese_train_y = create_pairs(x_train, digit_idx)
 
-# Create testi pairs
-#siamese_test_pairs, siamese_test_y = 
+# Create test pairs
+digit_idx = [np.where(y_test == i)[0] for i in range(num_classes)]
+siamese_test_pairs, siamese_test_y = create_pairs(x_test, digit_idx)
+
+# Create unknown test pairs
+digit_idx = [np.where(y_test_unknown == i)[0] for i in range(num_classes)]
+siamese_test_unknown_pairs, siamese_test_unknown_y = create_pairs(x_test_unknown, digit_idx)
 
 """
 3. Create CNN Architecture
-
 """
 model = base_model(input_shape=input_shape, num_classes=num_classes)
 """
 4. Siamese network
-
 """
 # Processed left and right inputs using the model
 processed_l = model(left_input)
@@ -152,7 +182,6 @@ siamese_model = Model([processed_l, processed_r], distance)
 
 """
 5. Train the model using pairs of data
-
 """
 # Specify number of epochs for training
 epochs = 20
@@ -167,7 +196,6 @@ siamese_model.fit([siamese_train_pairs[:, 0], siamese_train_pairs[:, 1]], siames
 
 """
 6. Get train and test set
-
 """
 train_y_pred = model.predict([siamese_train_pairs[:, 0], siamese_train_pairs[:, 1]])
 train_accuracy = compute_accuracy(y_ground_truth=siamese_train_y, y_pred=train_y_pred)
@@ -175,6 +203,10 @@ train_accuracy = compute_accuracy(y_ground_truth=siamese_train_y, y_pred=train_y
 test_y_pred = model.predict([siamese_test_pairs[:, 0], siamese_test_pairs[:, 1]])
 test_accuracy = compute_accuracy(y_ground_truth=siamese_test_y, y_pred=test_y_pred)
 
+test_unknown_y_pred = model.predict([siamese_test_unknown_pairs[:, 0], siamese_test_unknown_pairs[:, 1]])
+test_unknown_accuracy = compute_accuracy(y_ground_truth=siamese_test_unknown_y, y_pred=test_unknown_y_pred)
+
 print('======Siamese Network Result======')
-print(f'Train accuracy: {train_accuracy}')
-print(f'Test accuracy: {test_accuracy}')
+print('Train accuracy: ' + train_accuracy)
+print('Test accuracy: ' + test_accuracy)
+print('Test unkown accuracy: ' + test_unknown_accuracy)
