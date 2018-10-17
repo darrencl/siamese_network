@@ -53,8 +53,8 @@ Lastly, the distance is the squareroot of the sum all of results.
 :return enclidean distance
 
 """
-def euclidean_distance(2d_vec):
-    x, y = 2d_vec
+def euclidean_distance(vec_2d):
+    x, y = vec_2d
     sum_square = K.sum(K.square(x - y), axis=1, keepdims=True)
     result = K.sqrt(K.maximum(sum_square, K.epsilon()))
     return result
