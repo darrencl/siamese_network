@@ -84,8 +84,6 @@ Finally the prediction is compared to the ground truth
 
 """
 def compute_accuracy(y_ground_truth, y_pred):
-    '''Compute classification accuracy with a fixed threshold on distances.
-    '''
     pred = y_pred.ravel() < 0.5
     return np.mean(pred == y_ground_truth)
 
