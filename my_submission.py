@@ -1,6 +1,6 @@
 import random
 import tensorflow as tf
-from tensorflow import keras
+import keras
 import numpy as np
 from keras import backend as K
 from keras.models import Model
@@ -36,10 +36,12 @@ def create_pairs(xlist, digit_idx):
     pairs = []
     labels = []
     
-    digit_len = [len(digit_idx[d]) for d in range(num_classes)] # Get the number of items for each digit/class
+    digits = [d for d in range(num_classes) if len(digit_idx[d] > 0)]
+    digit_len = [len(digit_idx[d]) for d in digits] # Get the number of items for each digit/class
+    
     n = min(digit_len) - 1 # Find the length of the smallest set of digits
     
-    for d in range(num_classes):
+    for d in digits:
         for i in range(n):
             # Assign positive pair
             pos_idx1, pos_idx2 = digit_idx[d][i], digit_idx[d][i+1]
@@ -47,8 +49,8 @@ def create_pairs(xlist, digit_idx):
             pairs += [[pos1,pos2]]
             
             # Assign a random digit that is not the original digit
-            rand_d = random.randrange(1,num_classes)
-            rand_d = (d + rand_d) % num_classes
+            other = [dgt for dgt in digits if dgt != d]
+            rand_d = int(np.random.choice(digits, 1, replace = False))
             
             # Assign negative pair
             neg_idx1, neg_idx2 = digit_idx[d][i], digit_idx[rand_d][i]
@@ -63,20 +65,19 @@ def create_pairs(xlist, digit_idx):
 """
 Create the base model for siamese network, this is based on CNN architecture
 """
-def base_model(input_shape, num_classes):
-    model = keras.models.Sequential()
-    model.add(keras.layers.Conv2D(32, kernel_size=(3, 3),
-                     activation='relu',
-                     input_shape=input_shape))
-    model.add(keras.layers.Conv2D(64, (3, 3), activation='relu'))
-    model.add(keras.layers.MaxPooling2D(pool_size=(2, 2)))
-    model.add(keras.layers.Dropout(0.25))
-    model.add(keras.layers.Flatten())
-    model.add(keras.layers.Dense(128, activation='relu'))
-    model.add(keras.layers.Dropout(0.5))
-    model.add(keras.layers.Dense(num_classes, activation='softmax'))
+def base_model(input_shape):
+    input_layer = keras.layers.Input(shape=input_shape)
+    model = keras.layers.Conv2D(32, kernel_size=(3, 3),
+                     activation='relu')(input_layer)
+    model = keras.layers.Conv2D(64, (3, 3), activation='relu')(model)
+    model = keras.layers.MaxPooling2D(pool_size=(2, 2))(model)
+    model = keras.layers.Dropout(0.25)(model)
+    model = keras.layers.Flatten()(model)
+    model = keras.layers.Dense(128, activation='relu')(model)
+    model = keras.layers.Dropout(0.5)(model)
+    model = keras.layers.Dense(num_classes, activation='softmax')(model)
 
-    return model
+    return Model(input_layer, model)
 
 """
 Define functions to compute euclidean distance.
@@ -117,6 +118,14 @@ def compute_accuracy(y_ground_truth, y_pred):
     return np.mean(pred == y_ground_truth)
 
 
+def contrastive_loss(y_true, y_pred):
+    '''Contrastive loss from Hadsell-et-al.'06
+    http://yann.lecun.com/exdb/publis/pdf/hadsell-chopra-lecun-06.pdf
+    '''
+    margin = 1
+    sqaure_pred = K.square(y_pred)
+    margin_square = K.square(K.maximum(margin - y_pred, 0))
+    return K.mean(y_true * sqaure_pred + (1 - y_true) * margin_square)
 """
 Main code start 
 """
@@ -163,7 +172,7 @@ siamese_test_unknown_pairs, siamese_test_unknown_y = create_pairs(x_test_unknown
 """
 3. Create CNN Architecture
 """
-model = base_model(input_shape=input_shape, num_classes=num_classes)
+model = base_model(input_shape=input_shape)
 """
 4. Siamese network
 """
@@ -178,17 +187,17 @@ distance = keras.layers.Lambda(euclidean_distance,
                   output_shape=euclidean_distance_output_shape)([processed_l, processed_r])
 
 # Create siamese net
-siamese_model = Model([processed_l, processed_r], distance)
+siamese_model = Model([left_input, right_input], distance)
 
 """
 5. Train the model using pairs of data
 """
 # Specify number of epochs for training
-epochs = 20
+epochs = 1
 
-siamese_model.compile(loss=constrastive_loss,
+siamese_model.compile(loss=contrastive_loss,
                     optimizer=keras.optimizers.Adadelta(),
-                    metrics=[accuracy])
+                    metrics=['accuracy'])
 
 siamese_model.fit([siamese_train_pairs[:, 0], siamese_train_pairs[:, 1]], siamese_train_y,
                 batch_size=128,
