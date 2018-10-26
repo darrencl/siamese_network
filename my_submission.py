@@ -50,7 +50,7 @@ def create_pairs(xlist, digit_idx):
             
             # Assign a random digit that is not the original digit
             other = [dgt for dgt in digits if dgt != d]
-            rand_d = int(np.random.choice(digits, 1, replace = False))
+            rand_d = int(np.random.choice(other, 1, replace = False))
             
             # Assign negative pair
             neg_idx1, neg_idx2 = digit_idx[d][i], digit_idx[rand_d][i]
@@ -75,7 +75,7 @@ def base_model(input_shape):
     model = keras.layers.Flatten()(model)
     model = keras.layers.Dense(128, activation='relu')(model)
     model = keras.layers.Dropout(0.5)(model)
-    model = keras.layers.Dense(num_classes, activation='softmax')(model)
+    model = keras.layers.Dense(10, activation='relu')(model)
 
     return Model(input_layer, model)
 
@@ -125,7 +125,15 @@ def contrastive_loss(y_true, y_pred):
     margin = 1
     sqaure_pred = K.square(y_pred)
     margin_square = K.square(K.maximum(margin - y_pred, 0))
-    return K.mean(y_true * sqaure_pred + (1 - y_true) * margin_square)
+    return K.mean(y_true * sqaure_pred + (1-y_true) * margin_square)
+  
+def accuracy_cust(y_true, y_pred):
+    '''Compute classification accuracy with a fixed threshold on distances.
+    '''
+    return K.mean(K.equal(y_true, K.cast(y_pred < 0.5, y_true.dtype)))
+
+  
+  
 """
 Main code start 
 """
@@ -138,17 +146,12 @@ Main code start
 img_rows, img_cols = 28, 28
 num_classes = 10
 
-if K.image_data_format() == 'channels_first':
-    x_train = x_train.reshape(x_train.shape[0], 1, img_rows, img_cols)
-    x_test = x_test.reshape(x_test.shape[0], 1, img_rows, img_cols)
-    input_shape = (1, img_rows, img_cols)
-else:
-    x_train = x_train.reshape(x_train.shape[0], img_rows, img_cols, 1)
-    x_test = x_test.reshape(x_test.shape[0], img_rows, img_cols, 1)
-    input_shape = (img_rows, img_cols, 1)
+x_train = x_train.reshape(x_train.shape[0], img_rows, img_cols, 1)
+x_test = x_test.reshape(x_test.shape[0], img_rows, img_cols, 1)
+input_shape = (img_rows, img_cols, 1)
 
-left_input = keras.layers.Input(shape=input_shape)
-right_input = keras.layers.Input(shape=input_shape)
+
+
 """
 2. Preprocess dataset
 """
@@ -156,6 +159,8 @@ right_input = keras.layers.Input(shape=input_shape)
 x_set, y_set = split_dataset(x_train, y_train, x_test, y_test)
 x_train, x_test, x_test_unknown = x_set
 y_train, y_test, y_test_unknown = y_set
+
+num_classes = 10
 
 # Create training pairs
 digit_idx = [np.where(y_train == i)[0] for i in range(num_classes)]
@@ -169,13 +174,18 @@ siamese_test_pairs, siamese_test_y = create_pairs(x_test, digit_idx)
 digit_idx = [np.where(y_test_unknown == i)[0] for i in range(num_classes)]
 siamese_test_unknown_pairs, siamese_test_unknown_y = create_pairs(x_test_unknown, digit_idx)
 
+
 """
 3. Create CNN Architecture
 """
+print(f'input_shape={input_shape}')
 model = base_model(input_shape=input_shape)
 """
 4. Siamese network
 """
+left_input = keras.layers.Input(shape=input_shape)
+right_input = keras.layers.Input(shape=input_shape)
+
 # Processed left and right inputs using the model
 processed_l = model(left_input)
 processed_r = model(right_input)
@@ -193,29 +203,33 @@ siamese_model = Model([left_input, right_input], distance)
 5. Train the model using pairs of data
 """
 # Specify number of epochs for training
-epochs = 1
+epochs = 64
+
+adam = keras.optimizers.Adam()
 
 siamese_model.compile(loss=contrastive_loss,
-                    optimizer=keras.optimizers.Adadelta(),
-                    metrics=['accuracy'])
+                    optimizer=adam,
+                    metrics=[accuracy_cust])
 
-siamese_model.fit([siamese_train_pairs[:, 0], siamese_train_pairs[:, 1]], siamese_train_y,
+siamese_model.fit([siamese_train_pairs[:, 0], siamese_train_pairs[:, 1]], siamese_train_y[:],
                 batch_size=128,
+                validation_data=([siamese_test_pairs[:, 0], siamese_test_pairs[:, 1]], siamese_test_y[:]),
                 epochs=epochs)
 
 """
 6. Get train and test set
 """
-train_y_pred = model.predict([siamese_train_pairs[:, 0], siamese_train_pairs[:, 1]])
+
+train_y_pred = siamese_model.predict([siamese_train_pairs[:, 0], siamese_train_pairs[:, 1]])
 train_accuracy = compute_accuracy(y_ground_truth=siamese_train_y, y_pred=train_y_pred)
 
-test_y_pred = model.predict([siamese_test_pairs[:, 0], siamese_test_pairs[:, 1]])
+test_y_pred = siamese_model.predict([siamese_test_pairs[:, 0], siamese_test_pairs[:, 1]])
 test_accuracy = compute_accuracy(y_ground_truth=siamese_test_y, y_pred=test_y_pred)
 
-test_unknown_y_pred = model.predict([siamese_test_unknown_pairs[:, 0], siamese_test_unknown_pairs[:, 1]])
+test_unknown_y_pred = siamese_model.predict([siamese_test_unknown_pairs[:, 0], siamese_test_unknown_pairs[:, 1]])
 test_unknown_accuracy = compute_accuracy(y_ground_truth=siamese_test_unknown_y, y_pred=test_unknown_y_pred)
 
 print('======Siamese Network Result======')
-print('Train accuracy: ' + train_accuracy)
-print('Test accuracy: ' + test_accuracy)
-print('Test unkown accuracy: ' + test_unknown_accuracy)
+print(f'Train accuracy: {train_accuracy}')
+print(f'Test accuracy: {test_accuracy}')
+print(f'Test unknown accuracy: {test_unknown_accuracy}')
