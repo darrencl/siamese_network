@@ -1,3 +1,12 @@
+"""
+Authors:
+Ahmad Megan Tabawani - N9556915
+Darren Christopher Lukas - N9541951
+David John McGill – N10357262
+
+"""
+
+
 import random
 import tensorflow as tf
 import keras
@@ -157,10 +166,10 @@ input_shape = (img_rows, img_cols, 1)
 """
 # Split dataset
 x_set, y_set = split_dataset(x_train, y_train, x_test, y_test)
-x_train, x_test, x_test_unknown = x_set
-y_train, y_test, y_test_unknown = y_set
-
-num_classes = 10
+x_train, x_test_unknown, x_test = x_set
+x_test_all = np.append(x_test, x_test_unknown, axis=0)
+y_train, y_test_unknown, y_test = y_set
+y_test_all = np.append(y_test, y_test_unknown, axis=0)
 
 # Create training pairs
 digit_idx = [np.where(y_train == i)[0] for i in range(num_classes)]
@@ -169,6 +178,10 @@ siamese_train_pairs, siamese_train_y = create_pairs(x_train, digit_idx)
 # Create test pairs
 digit_idx = [np.where(y_test == i)[0] for i in range(num_classes)]
 siamese_test_pairs, siamese_test_y = create_pairs(x_test, digit_idx)
+
+# Create test pairs for all digits
+digit_idx = [np.where(y_test_all == i)[0] for i in range(num_classes)]
+siamese_test_all_pairs, siamese_test_all_y = create_pairs(x_test_all, digit_idx)
 
 # Create unknown test pairs
 digit_idx = [np.where(y_test_unknown == i)[0] for i in range(num_classes)]
@@ -198,20 +211,19 @@ distance = keras.layers.Lambda(euclidean_distance,
 
 # Create siamese net
 siamese_model = Model([left_input, right_input], distance)
-
 """
 5. Train the model using pairs of data
 """
 # Specify number of epochs for training
-epochs = 64
+epochs = 26
 
-adam = keras.optimizers.Adam()
+nadam = keras.optimizers.Nadam()
 
 siamese_model.compile(loss=contrastive_loss,
-                    optimizer=adam,
+                    optimizer=nadam,
                     metrics=[accuracy_cust])
 
-siamese_model.fit([siamese_train_pairs[:, 0], siamese_train_pairs[:, 1]], siamese_train_y[:],
+history = siamese_model.fit([siamese_train_pairs[:, 0], siamese_train_pairs[:, 1]], siamese_train_y[:],
                 batch_size=128,
                 validation_data=([siamese_test_pairs[:, 0], siamese_test_pairs[:, 1]], siamese_test_y[:]),
                 epochs=epochs)
@@ -226,10 +238,36 @@ train_accuracy = compute_accuracy(y_ground_truth=siamese_train_y, y_pred=train_y
 test_y_pred = siamese_model.predict([siamese_test_pairs[:, 0], siamese_test_pairs[:, 1]])
 test_accuracy = compute_accuracy(y_ground_truth=siamese_test_y, y_pred=test_y_pred)
 
+test_all_y_pred = siamese_model.predict([siamese_test_all_pairs[:, 0], siamese_test_all_pairs[:, 1]])
+test_all_accuracy = compute_accuracy(y_ground_truth=siamese_test_all_y, y_pred=test_all_y_pred)
+
 test_unknown_y_pred = siamese_model.predict([siamese_test_unknown_pairs[:, 0], siamese_test_unknown_pairs[:, 1]])
 test_unknown_accuracy = compute_accuracy(y_ground_truth=siamese_test_unknown_y, y_pred=test_unknown_y_pred)
 
 print('======Siamese Network Result======')
 print(f'Train accuracy: {train_accuracy}')
 print(f'Test accuracy: {test_accuracy}')
+print(f'Test all accuracy: {test_all_accuracy}')
 print(f'Test unknown accuracy: {test_unknown_accuracy}')
+
+import matplotlib.pyplot as plt
+# summarize history for accuracy
+plt.plot(history.history['accuracy_cust'])
+plt.plot(history.history['val_accuracy_cust'])
+plt.title('model accuracy')
+plt.ylabel('accuracy')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'], loc='upper left')
+plt.show()
+
+# summarize history for loss
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('model loss')
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'], loc='upper left')
+plt.show()
+
+epoch_max_acc = np.argmax(history.history['val_accuracy_cust']) +1
+print(f'Max acc is at {epoch_max_acc} epoch')
