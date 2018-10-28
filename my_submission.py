@@ -246,8 +246,12 @@ siamese_model = Model([left_input, right_input], distance)
 epochs = 26
 
 nadam = keras.optimizers.Nadam()
+adam = keras.optimizers.Adam()
+adamax = keras.optimizers.Adamax()
 
-siamese_model.compile(loss=contrastive_loss, optimizer=nadam, metrics=[accuracy_cust])
+siamese_model.compile(
+    loss=contrastive_loss, optimizer=nadam, metrics=[accuracy_cust]
+)  # Change optimizer parameter for experiments
 
 history = siamese_model.fit(
     [siamese_train_pairs[:, 0], siamese_train_pairs[:, 1]],
